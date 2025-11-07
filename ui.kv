@@ -1,0 +1,53 @@
+#:import MDRaisedButton kivymd.uix.button.MDRaisedButton
+#:import MDLabel kivymd.uix.label.MDLabel
+#:import MDBoxLayout kivymd.uix.boxlayout.MDBoxLayout
+
+BoxLayout:
+    orientation: "vertical"
+    spacing: dp(10)
+    padding: dp(15)
+
+    MDLabel:
+        text: "Age & Gender Detector"
+        halign: "center"
+        font_style: "H5"
+        size_hint_y: None
+        height: dp(40)
+
+    Image:
+        id: img
+        size_hint_y: None
+        height: dp(300)
+        allow_stretch: True
+        keep_ratio: True
+        canvas.before:
+            Color:
+                rgba: 0.9, 0.9, 0.95, 1
+            RoundedRectangle:
+                pos: self.pos
+                size: self.size
+                radius: [12]
+
+    MDLabel:
+        id: result_label
+        text: "Loading models..."
+        halign: "center"
+        theme_text_color: "Primary"
+        size_hint_y: None
+        height: dp(60)
+
+    MDBoxLayout:
+        orientation: "vertical"
+        spacing: dp(10)
+
+        MDRaisedButton:
+            text: "🖼️ Load Image"
+            on_release: app.open_file_dialog()
+
+        MDRaisedButton:
+            text: "🎥 Start Webcam"
+            on_release: app.start_webcam()
+
+        MDRaisedButton:
+            text: "⛔ Stop Webcam"
+            on_release: app.stop_webcam()

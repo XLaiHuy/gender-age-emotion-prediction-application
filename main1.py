@@ -1,13 +1,17 @@
 import sys
 import cv2
 import numpy as np
+import torch
+import torch.nn as nn
+from torchvision import models, transforms
+from PIL import Image
+
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QLabel, QPushButton, QVBoxLayout, QFileDialog,
     QHBoxLayout, QFrame, QGraphicsDropShadowEffect, QMessageBox
 )
 from PyQt5.QtGui import QImage, QPixmap, QFont, QColor
 from PyQt5.QtCore import QTimer, Qt
-
 
 # =========================
 #       MODEL FILES
@@ -28,12 +32,39 @@ ageList = ['(0-2)', '(4-6)', '(8-12)', '(15-20)',
            '(25-32)', '(38-43)', '(48-53)', '(60-100)']
 genderList = ['Male', 'Female']
 
+# =========================
+#       EMOTION MODEL
+# =========================
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+emotion_model = models.resnet18(pretrained=False)
+num_ftrs = emotion_model.fc.in_features
+emotion_model.fc = nn.Linear(num_ftrs, 7)
+
+emotion_model.load_state_dict(
+    torch.load("resnet18_fer2013.pth", map_location=device)
+)
+
+emotion_model.to(device)
+emotion_model.eval()
+
+emotion_labels = ['Angry','Disgust','Fear','Happy','Sad','Surprise','Neutral']
+
+emotion_transform = transforms.Compose([
+    transforms.Grayscale(num_output_channels=3),
+    transforms.Resize((224, 224)),
+    transforms.ToTensor(),
+    transforms.Normalize([0.485, 0.456, 0.406],
+                         [0.229, 0.224, 0.225])
+])
+
 
 def detect_faces(face_net, frame):
     h, w = frame.shape[:2]
     blob = cv2.dnn.blobFromImage(frame, 1.0, (227, 227), [104, 117, 123], swapRB=False)
     face_net.setInput(blob)
     det = face_net.forward()
+
     boxes = []
     for i in range(det.shape[2]):
         conf = det[0, 0, i, 2]
@@ -53,10 +84,9 @@ class AgeGenderApp(QWidget):
     def __init__(self):
         super().__init__()
 
-        self.setWindowTitle("Age & Gender Detector — Windows 11 UI")
+        self.setWindowTitle("Age • Gender • Emotion Detector — Windows 11 UI")
         self.resize(1280, 780)
 
-        # State
         self.cap = None
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_frame)
@@ -64,14 +94,14 @@ class AgeGenderApp(QWidget):
         self.dark_mode = False
 
         # Title
-        self.title = QLabel("Age & Gender Detector")
+        self.title = QLabel("Age • Gender • Emotion Detector")
         self.title.setFont(QFont("Segoe UI Variable Display", 32, QFont.Bold))
         self.title.setAlignment(Qt.AlignCenter)
 
         divider = QFrame()
         divider.setFrameShape(QFrame.HLine)
 
-        # Card
+        # Image Card
         self.card = QFrame()
         shadow = QGraphicsDropShadowEffect()
         shadow.setBlurRadius(40)
@@ -108,14 +138,12 @@ class AgeGenderApp(QWidget):
             btn_row.addSpacing(14)
         btn_row.addStretch()
 
-        # Layout ROOT
         root = QVBoxLayout(self)
         root.setContentsMargins(40, 20, 40, 20)
         root.addWidget(self.title)
         root.addWidget(divider)
         root.addSpacing(8)
 
-        # ✅ Center webcam card
         center_box = QHBoxLayout()
         center_box.addStretch()
         center_box.addWidget(self.card)
@@ -125,87 +153,36 @@ class AgeGenderApp(QWidget):
         root.addSpacing(14)
         root.addLayout(btn_row)
 
-        # Apply theme
-        self.setWindowOpacity(1.0)
         self.apply_theme(light=True)
 
-    # ========================================
-    #           THEME ENGINE
-    # ========================================
+    # ============================
+    #       THEME
+    # ============================
     def apply_theme(self, light=True):
-
         if light:
-            # Background Fluent Light
             self.setStyleSheet("""
                 QWidget {
-                    background: qlineargradient(x1:0 y1:0, x2:1 y2:1,
-                        stop:0 #F6F8FB, stop:1 #E8ECF3);
+                    background: #F6F8FB;
                     color: #1B1D21;
-                    font-family: 'Segoe UI Variable Display';
                 }
             """)
-
-            self.title.setStyleSheet("color:#1A1A1C; padding:20px;")
-
-            self.card.setStyleSheet("""
-                QFrame {
-                    background: rgba(255,255,255,0.65);
-                    border-radius: 26px;
-                    border: 1px solid rgba(180,180,180,0.35);
-                }
-            """)
-
-            self.image_label.setStyleSheet("""
-                QLabel {
-                    background: rgba(255,255,255,0.75);
-                    border-radius: 18px;
-                    border: 1px solid rgba(200,200,200,0.45);
-                }
-            """)
-
-            btn_style = self.btn_style_light()
-
-        # ================= DARK THEME =================
         else:
             self.setStyleSheet("""
                 QWidget {
-                    background: qlineargradient(x1:0 y1:0, x2:1 y2:1,
-                        stop:0 #0D0E11, stop:1 #1A1C20);
-                    color:#EEE;
-                    font-family: 'Segoe UI Variable Display';
+                    background: #0F1115;
+                    color: #EEE;
                 }
             """)
-
-            self.title.setStyleSheet("color:#EEE; padding:20px;")
-
-            self.card.setStyleSheet("""
-                QFrame {
-                    background: rgba(32,34,40,0.55);
-                    border-radius: 26px;
-                    border: 1px solid rgba(255,255,255,0.08);
-                }
-            """)
-
-            self.image_label.setStyleSheet("""
-                QLabel {
-                    background: rgba(18,20,24,0.75);
-                    border-radius:18px;
-                    border:1px solid rgba(255,255,255,0.06);
-                }
-            """)
-
-            btn_style = self.btn_style_dark()
-
         for b in [self.btn_load, self.btn_start, self.btn_stop, self.btn_save, self.btn_theme]:
-            b.setStyleSheet(btn_style)
+            b.setStyleSheet(self.btn_style_dark() if not light else self.btn_style_light())
 
     def toggle_theme(self):
         self.dark_mode = not self.dark_mode
         self.apply_theme(light=not self.dark_mode)
 
-    # ========================================
-    #                 BUTTONS
-    # ========================================
+    # ============================
+    #       BUTTON STYLES
+    # ============================
     def new_btn(self, text):
         b = QPushButton(text)
         b.setMinimumHeight(40)
@@ -215,42 +192,43 @@ class AgeGenderApp(QWidget):
     def btn_style_light(self):
         return """
             QPushButton {
-                background: #FFFFFF;
-                border: 1px solid #D0D3DA;
+                background: white;
                 border-radius: 12px;
                 padding: 10px 18px;
                 font-size: 15px;
-                color: #1B1D21;
+                border: 1px solid #D0D3DA;
             }
             QPushButton:hover { background:#F2F3F7; }
-            QPushButton:pressed { background:#E4E6EB; }
         """
 
     def btn_style_dark(self):
         return """
             QPushButton {
-                background: rgba(255,255,255,0.08);
-                border: 1px solid rgba(255,255,255,0.12);
-                border-radius:12px;
-                padding:10px 18px;
-                font-size:15px;
-                color:#EEE;
+                background: rgba(255,255,255,0.1);
+                border-radius: 12px;
+                padding: 10px 18px;
+                font-size: 15px;
+                border: 1px solid rgba(255,255,255,0.2);
             }
-            QPushButton:hover { background:rgba(255,255,255,0.18); }
-            QPushButton:pressed { background:rgba(255,255,255,0.25); }
+            QPushButton:hover { background: rgba(255,255,255,0.2); }
         """
 
-    # ========================================
-    #                  LOGIC
-    # ========================================
+    # ============================
+    #        LOAD IMAGE
+    # ============================
     def load_image(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Select Image", "", "Images (*.png *.jpg *.jpeg)")
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Select Image", "", "Images (*.png *.jpg *.jpeg)"
+        )
         if not path:
             return
         img = cv2.imread(path)
         self.current_frame = img.copy()
         self.render_and_show(img)
 
+    # ============================
+    #        WEBCAM
+    # ============================
     def start_webcam(self):
         if self.cap:
             return
@@ -267,19 +245,26 @@ class AgeGenderApp(QWidget):
         self.current_frame = None
         self.image_label.clear()
 
+    # ============================
+    #        SAVE IMAGE
+    # ============================
     def save_image(self):
         if self.current_frame is None:
             QMessageBox.warning(self, "Save", "⚠ Nothing to save.")
             return
 
-        path, _ = QFileDialog.getSaveFileName(self, "Save Image", "image.png",
-                                              "PNG (*.png);; JPG (*.jpg)")
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save Image", "image.png", "PNG (*.png);; JPG (*.jpg)"
+        )
         if not path:
             return
 
         cv2.imwrite(path, self.current_frame)
         QMessageBox.information(self, "Saved", f"✅ Saved to:\n{path}")
 
+    # ============================
+    #        UPDATE FRAME
+    # ============================
     def update_frame(self):
         if not self.cap:
             return
@@ -290,24 +275,47 @@ class AgeGenderApp(QWidget):
         self.current_frame = frame.copy()
         self.render_and_show(frame)
 
-    # ========================================
-    #                 RENDER
-    # ========================================
+    # ============================
+    #      EMOTION PREDICTION
+    # ============================
+    def predict_emotion(self, face_bgr):
+        try:
+            rgb = cv2.cvtColor(face_bgr, cv2.COLOR_BGR2RGB)
+            pil_img = Image.fromarray(rgb)
+            tensor = emotion_transform(pil_img).unsqueeze(0).to(device)
+
+            with torch.no_grad():
+                out = emotion_model(tensor)
+                idx = out.argmax(1).item()
+                return emotion_labels[idx]
+        except:
+            return ""
+
+    # ============================
+    #        RENDER FRAME
+    # ============================
     def render_and_show(self, frame_bgr):
         annotated = self.render_only(frame_bgr.copy())
+
         rgb = cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB)
         h, w, ch = rgb.shape
         qimg = QImage(rgb.data, w, h, ch * w, QImage.Format_RGB888)
 
         pix = QPixmap.fromImage(qimg)
-        pix = pix.scaled(self.image_label.width(),
-                         self.image_label.height(),
-                         Qt.KeepAspectRatio,
-                         Qt.SmoothTransformation)
+        pix = pix.scaled(
+            self.image_label.width(),
+            self.image_label.height(),
+            Qt.KeepAspectRatio,
+            Qt.SmoothTransformation
+        )
         self.image_label.setPixmap(pix)
 
+    # ============================
+    #      PROCESS FRAME
+    # ============================
     def render_only(self, frame):
         boxes = detect_faces(faceNet, frame)
+
         for (x1, y1, x2, y2) in boxes:
 
             face = frame[y1:y2, x1:x2]
@@ -322,13 +330,13 @@ class AgeGenderApp(QWidget):
             ageNet.setInput(blob)
             age = ageList[ageNet.forward()[0].argmax()]
 
-            label = f"{gender}, {age}"
+            emotion = self.predict_emotion(face)
+
+            label = f"{gender}, {age}, {emotion}"
 
             cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-            (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)
-            cv2.rectangle(frame, (x1, y1 - th - 10), (x1 + tw + 10, y1), (0, 255, 0), -1)
-            cv2.putText(frame, label, (x1 + 5, y1 - 5),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 2)
+            cv2.putText(frame, label, (x1, y1 - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
 
         return frame
 
